@@ -5,9 +5,11 @@
 #include <Wire.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
-
-const char *ssid = "Wifi_1";        
-const char *password = "1234567890"; 
+#include "global_config.h"  // Глобальний міст для передачі змінних
+#include "ConfigManager.h"   // Чисті C-style обгортки ініціалізації веб-сервера
+// === ДОДАЙТЕ ЦІ ДВА РЯДКИ СЮДИ (Виділяємо пам'ять під змінні в головному файлі) ===
+String global_cam_resolution = "VGA";
+String global_cam_brightness = "0";
 
 #define PIR_PIN          3  
 #define OLED_SDA         2  
@@ -80,24 +82,21 @@ const unsigned char epd_bitmap_motion_off [] PROGMEM = {
 	0x0c, 0x30, 0x0c, 0x30, 0x0c, 0x30, 0x0e, 0x70, 0x07, 0xe0, 0x03, 0xc0, 0x00, 0x00, 0x00, 0x00
 };
 
-// --- ФУНКЦІЯ НОВОГО ІНТЕРФЕЙСУ ---
+// --- ФУНКЦІЯ ОНОВЛЕННЯ ЕКРАНА ---
 void updateScreen(String ipAddress) {
   display.clearDisplay();
   
   // 1. Малюємо верхню статусну панель (Іконки)
-  // Wi-Fi статус (Координати X=15, Y=5)
   if (wifiOk) display.drawBitmap(15, 5, epd_bitmap_wifi_on, 16, 16, SSD1306_WHITE);
   else display.drawBitmap(15, 5, epd_bitmap_wifi_off, 16, 16, SSD1306_WHITE);
   
-  // Камера статус (Координати X=56, Y=5)
   if (camOk) display.drawBitmap(56, 5, epd_bitmap_cam_on, 16, 16, SSD1306_WHITE);
   else display.drawBitmap(56, 5, epd_bitmap_cam_off, 16, 16, SSD1306_WHITE);
   
-  // Статус руху (Координати X=96, Y=5)
   if (motionDetected) display.drawBitmap(96, 5, epd_bitmap_motion_on, 16, 16, SSD1306_WHITE);
   else display.drawBitmap(96, 5, epd_bitmap_motion_off, 16, 16, SSD1306_WHITE);
   
-  // Текстові підписи під іконками (Рядок опису на Y=25)
+  // Текстові підписи під іконками
   display.setTextSize(1);
   display.setTextColor(SSD1306_WHITE);
   
@@ -108,10 +107,12 @@ void updateScreen(String ipAddress) {
   // Роздільна лінія між статусами та IP адресою
   display.drawFastHLine(0, 38, 128, SSD1306_WHITE);
   
-  // 2. Самий нижній рядок: IP: [Адреса]
+  // 2. Рядок з IP адресою / Інформація про Точку Доступу
   display.setCursor(5, 48);
-  if (wifiOk) {
+  if (WiFi.status() == WL_CONNECTED) {
     display.print("IP: " + ipAddress);
+  } else if (WiFi.getMode() == WIFI_AP) {
+    display.print("AP: 192.168.4.1:81"); // Вказуємо порт адмінки на екрані
   } else {
     display.print("IP: DISCONNECTED");
   }
@@ -119,6 +120,7 @@ void updateScreen(String ipAddress) {
   display.display();
 }
 
+// Handler для запиту фото з камери
 esp_err_t photo_handler(httpd_req_t *req) {
   camera_fb_t *fb = esp_camera_fb_get();
   if (!fb) {
@@ -132,6 +134,7 @@ esp_err_t photo_handler(httpd_req_t *req) {
   return res;
 }
 
+// Запуск вбудованого стрімінг-сервера камери (Порт 80)
 void startServer() {
   httpd_config_t config = HTTPD_DEFAULT_CONFIG();
   config.server_port = 80;
@@ -147,7 +150,7 @@ void setup() {
   Serial.begin(115200);
   delay(1000);
   
-  pinMode(PIR_PIN, INPUT_PULLDOWN); // Примусовий нуль на піну
+  pinMode(PIR_PIN, INPUT_PULLDOWN);
 
   Wire.begin(OLED_SDA, OLED_SCL, 400000);
   if(!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) while(true);
@@ -159,7 +162,10 @@ void setup() {
   display.print("LOADING SYSTEM...");
   display.display();
 
-  // Ініціалізація камери
+  // 1. ЗАПУСК БЕЗПЕЧНОГО СЕРВЕРА КОНФІГУРАЦІЇ (Працює ізольовано на порту 81)
+  initConfigManager();
+
+  // 2. ДИНАМІЧНА ІНІЦІАЛІЗАЦІЯ КАМЕРИ НА ОСНОВІ ДАНИХ З ВЕБ-ПАНЕЛІ
   camera_config_t config;
   config.ledc_channel = LEDC_CHANNEL_0; config.ledc_timer = LEDC_TIMER_0;
   config.pin_d0 = Y2_GPIO_NUM; config.pin_d1 = Y3_GPIO_NUM; config.pin_d2 = Y4_GPIO_NUM; config.pin_d3 = Y5_GPIO_NUM;
@@ -169,32 +175,42 @@ void setup() {
   config.xclk_freq_hz = 10000000; config.pixel_format = PIXFORMAT_JPEG;
   
   if(psramInit() && psramFound()){
-    config.frame_size = FRAMESIZE_UXGA; config.fb_location = CAMERA_FB_IN_PSRAM; config.fb_count = 2; config.jpeg_quality = 10;
+    config.fb_location = CAMERA_FB_IN_PSRAM; config.fb_count = 2; config.jpeg_quality = 10;
+    // Підставляємо налаштування якості з глобального мосту
+    if (global_cam_resolution == "UXGA") config.frame_size = FRAMESIZE_UXGA;
+    else if (global_cam_resolution == "CIF") config.frame_size = FRAMESIZE_CIF;
+    else config.frame_size = FRAMESIZE_VGA;
   } else {
-    config.frame_size = FRAMESIZE_SVGA; config.fb_location = CAMERA_FB_IN_DRAM; config.fb_count = 1; config.jpeg_quality = 12;
+    config.fb_location = CAMERA_FB_IN_DRAM; config.fb_count = 1; config.jpeg_quality = 12;
+    config.frame_size = FRAMESIZE_SVGA;
   }
   config.grab_mode = CAMERA_GRAB_LATEST;
   
   esp_err_t err = esp_camera_init(&config);
   if (err == ESP_OK) {
-    camOk = true; // Камера запущена успішно
+    camOk = true; 
+    // Застосовуємо яскравість камери з глобального мосту
+    sensor_t * s = esp_camera_sensor_get();
+    if (s) {
+      s->set_brightness(s, global_cam_brightness.toInt());
+    }
   }
 
-  // Підключення до Wi-Fi
-  WiFi.begin(ssid, password);
-  int attempts = 0;
-  while (WiFi.status() != WL_CONNECTED && attempts < 20) { 
-    delay(500); 
-    attempts++;
-  }
-  
+  // 3. АНАЛІЗ ПІДКЛЮЧЕННЯ ТА ЗАПУСК СТРІМІНГУ НА ПОРТУ 80
+  String ipStr = "";
   if (WiFi.status() == WL_CONNECTED) {
-    wifiOk = true; // Інтернет є
-    startServer();
+    wifiOk = true;
+    ipStr = WiFi.localIP().toString();
+    startServer(); 
+  } else {
+    wifiOk = false;
+    ipStr = WiFi.softAPIP().toString();
   }
+
+  updateScreen(ipStr);
 
   // === ТАЙМЕР КАЛІБРУВАННЯ PIR ===
-  for (int i = 30; i > 0; i--) { // Скорочено до 30 секунд для швидшого тесту
+  for (int i = 5; i > 0; i--) { 
     display.clearDisplay();
     display.setTextSize(1);
     display.setTextColor(SSD1306_WHITE);
@@ -207,6 +223,7 @@ void setup() {
     delay(1000);
   }
   isCalibrated = true;
+  updateScreen(ipStr);
 }
 
 void loop() {
@@ -220,24 +237,11 @@ void loop() {
     if ((millis() - lastDebounceTime) > debounceDelay) {
       if (reading != currentPirState) {
         currentPirState = reading;
+        motionDetected = (currentPirState == HIGH);
+        // Динамічно оновлюємо іконку датчика на екрані при детекції руху
+        updateScreen(wifiOk ? WiFi.localIP().toString() : WiFi.softAPIP().toString());
       }
     }
-
-    // Оновлюємо глобальний прапорець для іконки руху
-    if (currentPirState == HIGH) {
-      motionDetected = true;
-    } else {
-      motionDetected = false;
-    }
-
-    // Динамічно оновлюємо наш новий інтерфейс дисплея
-    if (wifiOk) {
-      updateScreen(WiFi.localIP().toString());
-    } else {
-      updateScreen("0.0.0.0");
-    }
-
     lastPirState = reading;
   }
-  delay(200); 
 }
