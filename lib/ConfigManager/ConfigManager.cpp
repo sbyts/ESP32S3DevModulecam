@@ -11,7 +11,6 @@ static String wifi_pass;
 static String admin_user;
 static String admin_pass;
 
-// ЧАСТИНА 1: Статичний HTML та CSS стилі (Безпечно віддаються браузеру)
 const char index_html_css[] PROGMEM = R"rawliteral(
 <!DOCTYPE html>
 <html lang="uk">
@@ -29,7 +28,7 @@ const char index_html_css[] PROGMEM = R"rawliteral(
             --border-color: #334155;
             --primary: #3b82f6;
             --secondary: #10b981;
-            --accent: #f59e0b;
+            --accent: #fbbf24;
         }
         * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
         body { background-color: var(--bg-color); color: var(--text-color); min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 20px; }
@@ -41,12 +40,23 @@ const char index_html_css[] PROGMEM = R"rawliteral(
         .section-title { font-size: 12px; font-weight: 600; letter-spacing: 1px; text-transform: uppercase; margin-bottom: 12px; }
         .wifi-title { color: #60a5fa; }
         .cam-title { color: #34d399; }
+        .cloud-title { color: #a855f7; }
         .security-title { color: #fbbf24; }
         .form-group { margin-bottom: 12px; }
         .form-group:last-child { margin-bottom: 0; }
         label { display: block; font-size: 12px; color: var(--text-muted); margin-bottom: 4px; }
         input[type="text"], input[type="password"], input[type="number"], select { width: 100%; background-color: var(--input-color); border: 1px solid var(--border-color); border-radius: 8px; padding: 10px 12px; color: var(--text-color); font-size: 14px; outline: none; transition: border-color 0.2s; }
         input:focus, select:focus { border-color: var(--primary); }
+        
+        /* Стилі для чекбоксу-перемикача */
+        .switch-group { display: flex; align-items: center; justify-content: space-between; padding-top: 4px; }
+        .switch { position: relative; display: inline-block; width: 44px; height: 24px; }
+        .switch input { opacity: 0; width: 0; height: 0; }
+        .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #334155; transition: .3s; border-radius: 24px; }
+        .slider:before { position: absolute; content: ""; height: 18px; width: 18px; left: 3px; bottom: 3px; background-color: white; transition: .3s; border-radius: 50%; }
+        input:checked + .slider { background-color: var(--secondary); }
+        input:checked + .slider:before { transform: translateX(20px); }
+
         .btn { width: 100%; background: linear-gradient(to right, #3b82f6, #10b981); color: white; border: none; border-radius: 8px; padding: 12px; font-size: 14px; font-weight: 500; cursor: pointer; transition: opacity 0.2s; margin-top: 8px; box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3); }
         .btn:hover { opacity: 0.9; }
     </style>
@@ -59,7 +69,6 @@ const char index_html_css[] PROGMEM = R"rawliteral(
         </div>
 )rawliteral";
 
-// ЧАСТИНА 2: Форма, куди за допомогою коду підставляються змінні
 const char index_html_form[] PROGMEM = R"rawliteral(
         <form action="/save" method="POST">
             <!-- Секція Wi-Fi -->
@@ -90,6 +99,21 @@ const char index_html_form[] PROGMEM = R"rawliteral(
                     <input type="number" name="brightness" min="-2" max="2" value="%BRIGHTNESS%">
                 </div>
             </div>
+            <!-- Секція Google Drive хмари -->
+            <div class="section">
+                <div class="section-title cloud-title">Google Drive Хмара</div>
+                <div class="form-group switch-group">
+                    <label style="margin-bottom: 0; font-size: 13px;">Активація відправки фото</label>
+                    <label class="switch">
+                        <input type="checkbox" name="drive_en" value="1" %DRIVE_CHECKED%>
+                        <span class="slider"></span>
+                    </label>
+                </div>
+                <div class="form-group" style="margin-top: 12px;">
+                    <label>Google Script ID</label>
+                    <input type="text" name="tgtoken" value="%TG_TOKEN%">
+                </div>
+            </div>
             <!-- Секція Адмінки -->
             <div class="section">
                 <div class="section-title security-title">Безпека Panel</div>
@@ -117,6 +141,8 @@ static void loadFromFlash() {
     admin_pass = prefs.getString("adminpass", "admin123");
     global_cam_resolution = prefs.getString("res", "VGA");
     global_cam_brightness = prefs.getString("bright", "0");
+    global_tg_token = prefs.getString("tgtoken", "");
+    global_drive_enable = prefs.getString("d_en", "0"); // Читаємо прапорець
     prefs.end();
 }
 
@@ -128,6 +154,8 @@ static void saveToFlash() {
     prefs.putString("adminpass", admin_pass);
     prefs.putString("res", global_cam_resolution);
     prefs.putString("bright", global_cam_brightness);
+    prefs.putString("tgtoken", global_tg_token);
+    prefs.putString("d_en", global_drive_enable); // Записуємо прапорець
     prefs.end();
 }
 
@@ -137,24 +165,24 @@ void setupRoutes() {
             return request->requestAuthentication();
         }
         
-        // ВИПРАВЛЕНО: Явно вказуємо правильний тип AsyncResponseStream* замість базового AsyncWebServerResponse*
         AsyncResponseStream *response = request->beginResponseStream("text/html");
-        
-        // Відправляємо статичні CSS стилі
         response->print(index_html_css);
         
-        // Робимо швидку ручну заміну змінних у формі без залучення важкого парсера бібліотеки
         String formWithData = index_html_form;
         formWithData.replace("%WIFI_SSID%", wifi_ssid);
         formWithData.replace("%WIFI_PASS%", wifi_pass);
         formWithData.replace("%ADMIN_USER%", admin_user);
         formWithData.replace("%ADMIN_PASS%", admin_pass);
         formWithData.replace("%BRIGHTNESS%", global_cam_brightness);
+        formWithData.replace("%TG_TOKEN%", global_tg_token);
+        
+        // Керування станом тумблера
+        formWithData.replace("%DRIVE_CHECKED%", (global_drive_enable == "1") ? "checked" : "");
+        
         formWithData.replace("%SEL_UXGA%", (global_cam_resolution == "UXGA") ? "selected" : "");
         formWithData.replace("%SEL_VGA%", (global_cam_resolution == "VGA") ? "selected" : "");
         formWithData.replace("%SEL_CIF%", (global_cam_resolution == "CIF") ? "selected" : "");
         
-        // Відправляємо готову форму
         response->print(formWithData);
         request->send(response);
     });
@@ -170,33 +198,35 @@ void setupRoutes() {
         admin_pass = request->arg("adminpass");
         global_cam_resolution = request->arg("resolution");
         global_cam_brightness = request->arg("brightness");
-
-        saveToFlash();
-
-        request->send(200, "text/plain", "Налаштування збережено успішно! ESP32-S3 перезавантажується...");
-        delay(2000);
-        ESP.restart();
-    });
+        global_tg_token = request->arg("tgtoken");
+        
+        // Якщо чекбокс не натиснуто, браузер не надсилає аргумент, тому перевіряємо його наявність
+if (request->hasArg("drive_en")) {
+global_drive_enable = "1";
+} else {
+global_drive_enable = "0";
 }
-
+saveToFlash();
+request->send(200, "text/plain", "Налаштування збережено успішно! ESP32-S3 перезавантажується...");
+delay(2000);
+ESP.restart();
+});
+}
 void initConfigManager() {
-    loadFromFlash();
-
-    if (wifi_ssid != "") {
-        WiFi.begin(wifi_ssid.c_str(), wifi_pass.c_str());
-        int counter = 0;
-        while (WiFi.status() != WL_CONNECTED && counter < 20) {
-            delay(500);
-            counter++;
-        }
-    }
-
-    if (WiFi.status() != WL_CONNECTED) {
-        WiFi.disconnect();
-        WiFi.mode(WIFI_AP);
-        WiFi.softAP("ESP32-S3-CAM-AP", NULL); 
-    }
-
-    setupRoutes();
-    server.begin();
+loadFromFlash();
+if (wifi_ssid != "") {
+WiFi.begin(wifi_ssid.c_str(), wifi_pass.c_str());
+int counter = 0;
+while (WiFi.status() != WL_CONNECTED && counter < 20) {
+delay(500);
+counter++;
+}
+}
+if (WiFi.status() != WL_CONNECTED) {
+WiFi.disconnect();
+WiFi.mode(WIFI_AP);
+WiFi.softAP("ESP32-S3-CAM-AP", NULL);
+}
+setupRoutes();
+server.begin();
 }

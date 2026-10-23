@@ -3,7 +3,6 @@
 
 #include <Arduino.h>
 
-// Прості функції-обгортки (C-style), які не тягнуть за собою жодних серверних бібліотек
 void initConfigManager();
 
 #endif
