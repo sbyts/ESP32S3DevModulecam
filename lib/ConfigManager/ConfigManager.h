@@ -1,8 +1,8 @@
-#ifndef CONFIG_MANAGER_H
-#define CONFIG_MANAGER_H
+#pragma once
 
-#include <Arduino.h>
-
+/**
+ * @brief Ініціалізує менеджер конфігурацій: завантажує налаштування з Flash,
+ * підключає Wi-Fi (або підіймає Access Point), реєструє API ендпоінти
+ * та запускає веб-сервер адмінки на порту 81.
+ */
 void initConfigManager();
-
-#endif
