@@ -4,6 +4,7 @@
 #include "ConfigManager.h"
 #include "global_config.h"
 #include "UiHtml.h" // Підключаємо наш HTML інтерфейс
+#include <LoggerManager.h> // Підключаємо наш новий логер з папки lib
 
 static AsyncWebServer server(81);
 static Preferences prefs;
@@ -11,10 +12,6 @@ static String wifi_ssid;
 static String wifi_pass;
 static String admin_user;
 static String admin_pass;
-
-// Зв'язок із масивом логів із main.cpp
-extern char sys_logs[LOG_MAX_ROWS][LOG_ROW_SIZE];
-extern int log_index;
 
 static void loadFromFlash() {
     prefs.begin("system_cfg", true);
@@ -84,22 +81,28 @@ static void setupRoutes() {
         request->send(200, "application/json", json);
     });
 
-    // 3. API Читання Циклічного Буфера Логів
+    // 3. API Читання Циклічного Буфера Логів (ОНОВЛЕНО під LoggerManager)
     server.on("/api/logs", HTTP_GET, [](AsyncWebServerRequest *request){
         if(!request->authenticate(admin_user.c_str(), admin_pass.c_str())){
             return request->send(401);
         }
+        
         String json = "[";
-        int start = log_index;
+        int start = LoggerManager::getLogIndex();
         bool first = true;
         
         for (int i = 0; i < LOG_MAX_ROWS; i++) {
             int idx = (start + i) % LOG_MAX_ROWS;
-            if (strlen(sys_logs[idx]) > 0) {
+            const char* logRow = LoggerManager::getLogRow(idx);
+            
+            if (logRow != nullptr && strlen(logRow) > 0) {
                 if (!first) json += ",";
-                String escapedLog = String(sys_logs[idx]);
+                String escapedLog = String(logRow);
+                
+                // Екрануємо символи для безпечного JSON
                 escapedLog.replace("\\", "\\\\");
                 escapedLog.replace("\"", "\\\"");
+                
                 json += "\"" + escapedLog + "\"";
                 first = false;
             }
@@ -124,6 +127,9 @@ static void setupRoutes() {
         global_drive_enable = request->hasArg("drive_en") ? "1" : "0";
         
         saveToFlash();
+        
+        LoggerManager::log("Системні налаштування оновлено через веб-адмінку.");
+        
         request->send(200, "text/plain", "Налаштування збережено! Перезавантаження ESP32-S3...");
         delay(2000);
         ESP.restart();

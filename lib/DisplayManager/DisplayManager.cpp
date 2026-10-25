@@ -3,6 +3,7 @@
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
 #include <WiFi.h>
+#include "LoggerManager.h"
 
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 
@@ -17,7 +18,7 @@ const unsigned char epd_bitmap_motion_off [] PROGMEM = { 0x00, 0x00, 0x00, 0x00,
 void initDisplay() {
     Wire.begin(OLED_SDA, OLED_SCL, 400000);
     if(!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
-        Serial.println("[OLED] Помилка виділення пам'яті");
+        LoggerManager::log("[OLED] Помилка виділення пам'яті");
         while(true);
     }
     display.clearDisplay();

@@ -1,0 +1,24 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "type": "shell",
+            "label": "PlatformIO: Clean, Build, Upload & Monitor",
+            "command": "~/.platformio/penv/Scripts/pio run -t clean && ~/.platformio/penv/Scripts/pio run && ~/.platformio/penv/Scripts/pio run -t upload && ~/.platformio/penv/Scripts/pio device monitor",
+            "windows": {
+                "command": "${env:HOMEDRIVE}${env:HOMEPATH}\\.platformio\\penv\\Scripts\\pio.exe run -t clean ; ${env:HOMEDRIVE}${env:HOMEPATH}\\.platformio\\penv\\Scripts\\pio.exe run ; ${env:HOMEDRIVE}${env:HOMEPATH}\\.platformio\\penv\\Scripts\\pio.exe run -t upload ; ${env:HOMEDRIVE}${env:HOMEPATH}\\.platformio\\penv\\Scripts\\pio.exe device monitor"
+            },
+            "problemMatcher": [
+                "$platformio"
+            ],
+            "presentation": {
+                "focus": true,
+                "panel": "new"
+            },
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            }
+        }
+    ]
+}
